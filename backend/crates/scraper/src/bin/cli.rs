@@ -9,7 +9,7 @@ use common::{
 };
 use log::info;
 use reqwest::Url;
-use scraper::{base_gov::client::BaseGovClient, export, search};
+use scraper::{base_gov::client::BaseGovClient, export, ingest, search};
 
 #[derive(clap::Parser)]
 #[command(version, about)]
@@ -42,6 +42,16 @@ enum Command {
         postgres_config: PostgresConfig,
         #[command(flatten)]
         meilisearch_config: MeilisearchConfig,
+    },
+    /// Ingest contracts from JSON export files (bypasses the slow scraper).
+    /// Reads all .json files in the given directory and inserts them into Postgres + Meilisearch.
+    Ingest {
+        #[command(flatten)]
+        postgres_config: PostgresConfig,
+        #[command(flatten)]
+        meilisearch_config: MeilisearchConfig,
+        /// Directory containing JSON files (e.g. Contratos2024.json, Contratos2025.json, ...)
+        dir: PathBuf,
     },
 }
 
@@ -98,6 +108,20 @@ async fn main() -> anyhow::Result<()> {
                     info!("Rebuild search index interrupted by user");
                 },
             }
+        }
+        Command::Ingest {
+            postgres_config,
+            meilisearch_config,
+            dir,
+        } => {
+            let contract_database = ContractDatabase::new_from_config(postgres_config).await?;
+            let search_database = SearchDatabase::new(meilisearch_config.create_client()?);
+            let (inserted, skipped, search_failures) =
+                ingest::ingest(&contract_database, &search_database, &dir).await?;
+            info!(
+                "Ingestion complete: {} inserted, {} skipped, {} search indexing failures",
+                inserted, skipped, search_failures
+            );
         }
     }
 

@@ -20,6 +20,7 @@ mod router;
 mod sort;
 mod state;
 mod statistics;
+mod admin;
 
 #[derive(Parser)]
 struct Args {

@@ -181,4 +181,12 @@ impl AppState {
             .await
             .map_err(Into::into)
     }
+
+    pub fn contract_database(&self) -> &ContractDatabase {
+        &self.contract_database
+    }
+
+    pub fn search_database(&self) -> &SearchDatabase {
+        &self.search_database
+    }
 }

@@ -14,8 +14,8 @@ use crate::store::rangeset::RangeSet;
 pub mod rangeset;
 
 pub struct Store {
-    search_database: SearchDatabase,
-    contract_database: ContractDatabase,
+    pub search_database: SearchDatabase,
+    pub contract_database: ContractDatabase,
     scrape_progress: Mutex<ScrapeProgress>,
     path: PathBuf,
 }

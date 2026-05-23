@@ -55,8 +55,6 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-contratopublico}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-contratopublico}
       POSTGRES_DB: ${POSTGRES_DB:-contratopublico}
-    ports:
-      - "3000:3000"
 
   # ── Frontend ───────────────────────────────────────────────
   frontend:

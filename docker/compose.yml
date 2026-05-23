@@ -51,7 +51,6 @@ services:
       - POSTGRES_USER=contratopublico
       - POSTGRES_PASSWORD=contratopublico
       - POSTGRES_DB=contratopublico
-      - BIND_URL=0.0.0.0:3000
 
   cli:
     profiles: ["manual"]

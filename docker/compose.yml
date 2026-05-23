@@ -2,97 +2,84 @@ name: contratopublico
 
 services:
   meilisearch:
-    restart: unless-stopped
     image: getmeili/meilisearch:v1
-    ports:
-      - "7700:7700"
+    restart: unless-stopped
     environment:
-      - MEILI_MASTER_KEY
-      - MEILI_EXPERIMENTAL_SEARCH_QUEUE_SIZE=3000
-      - MEILI_LOG_LEVEL=WARN
-      - MEILI_EXPERIMENTAL_DUMPLESS_UPGRADE=true
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey}
+      MEILI_EXPERIMENTAL_SEARCH_QUEUE_SIZE: "3000"
+      MEILI_LOG_LEVEL: WARN
+      MEILI_EXPERIMENTAL_DUMPLESS_UPGRADE: "true"
     volumes:
-      - ${DATA_FOLDER}/meili_data:/meili_data
+      - meili_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   postgres:
+    image: postgres:16
     restart: unless-stopped
-    image: postgres
     environment:
-      - POSTGRES_DB=contratopublico
-      - POSTGRES_USER=contratopublico
-      - POSTGRES_PASSWORD=contratopublico
+      POSTGRES_DB: ${POSTGRES_DB:-contratopublico}
+      POSTGRES_USER: ${POSTGRES_USER:-contratopublico}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-contratopublico}
     volumes:
-      - ${DATA_FOLDER}/postgres_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: "pg_isready -U contratopublico"
-      interval: 1s
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-contratopublico}"]
+      interval: 5s
       timeout: 60s
       retries: 5
 
+  # ── Backend ────────────────────────────────────────────────
   backend:
+    build:
+      context: ./backend
     restart: unless-stopped
     depends_on:
-      - meilisearch
-      - postgres
-    build:
-      context: ../backend
+      meilisearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     volumes:
-      - ${DATA_FOLDER}/scraper:/data/scraper
+      - scraper_data:/data/scraper
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      SAVED_PAGES_PATH: /data/scraper/saved_pages.json
+      SCRAPER_INTERVAL_SECS: ${SCRAPER_INTERVAL_SECS:-3600}
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-contratopublico}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-contratopublico}
+      POSTGRES_DB: ${POSTGRES_DB:-contratopublico}
     ports:
       - "3000:3000"
-    environment:
-      - RUST_LOG=info
-      - SAVED_PAGES_PATH=/data/scraper/saved_pages.json
-      - SCRAPER_INTERVAL_SECS=3600 # 60 minutes
-      - MEILISEARCH_URL=http://meilisearch:7700
-      - MEILI_MASTER_KEY
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=contratopublico
-      - POSTGRES_PASSWORD=contratopublico
-      - POSTGRES_DB=contratopublico
 
-  cli:
-    profiles: ["manual"]
-    restart: "no"
-    depends_on:
-      - meilisearch
-      - postgres
-    build:
-      context: ../backend
-    volumes:
-      - ${DATA_FOLDER}/scraper:/data/scraper
-    environment:
-      - RUST_LOG=info
-      - MEILISEARCH_URL=http://meilisearch:7700
-      - MEILI_MASTER_KEY
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_USER=contratopublico
-      - POSTGRES_PASSWORD=contratopublico
-      - POSTGRES_DB=contratopublico
-    entrypoint: ["/usr/local/bin/cli"]
-
+  # ── Frontend ───────────────────────────────────────────────
   frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      ORIGIN: ${ORIGIN:-http://localhost:7000}
+      BACKEND_URL: http://backend:3000
     ports:
       - "7000:7000"
-    restart: unless-stopped
-    depends_on:
-      - backend
-    build:
-      context: ../frontend
-    environment:
-      ORIGIN: https://contratopublico.freitasleite.me
-      BACKEND_URL: http://backend:3000
 
+  # ── Monitoring (optional – remove if not needed) ───────────
   prometheus:
     image: prom/prometheus:latest
-    volumes:
-      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ${DATA_FOLDER}/prometheus:/prometheus:rw
+    restart: unless-stopped
     depends_on:
       - backend
-    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus:rw
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -100,10 +87,41 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    restart: unless-stopped
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
     volumes:
-      - ../monitoring/grafana:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
-    restart: unless-stopped
+
+  # ── CLI (manual tasks – starts then exits) ─────────────────
+  cli:
+    build:
+      context: ./backend
+    restart: "no"
+    depends_on:
+      meilisearch:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - scraper_data:/data/scraper
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      MEILISEARCH_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-masterKey}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: ${POSTGRES_USER:-contratopublico}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-contratopublico}
+      POSTGRES_DB: ${POSTGRES_DB:-contratopublico}
+    entrypoint: ["/usr/local/bin/cli"]
+    profiles:
+      - manual
+
+volumes:
+  meili_data:
+  postgres_data:
+  scraper_data:
+  prometheus_data:
